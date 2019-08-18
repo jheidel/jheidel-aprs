@@ -134,7 +134,7 @@ func listen() error {
 			if *respond {
 				now := time.Now()
 				txmsg := fmt.Sprintf("rx at %s", now.Format("3:04 PM"))
-				resp := fmt.Sprintf("%s>APRS::%s : %s{%d\n", *serverCallsign, f.Source, txmsg, n)
+				resp := fmt.Sprintf("%s>APRS,WIDE::%s : %s{%d\n", *serverCallsign, f.Source, txmsg, n)
 				n += 1
 				log.Printf("Sending response: %q\n", strings.TrimSpace(resp))
 				if _, err := conn.Write([]byte(resp)); err != nil {
