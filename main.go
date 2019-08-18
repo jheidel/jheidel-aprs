@@ -86,6 +86,10 @@ func listen() error {
 	fmt.Fprintf(conn, "user %s pass %d vers %s %s filter %s\n",
 		*serverCallsign, pass, ClientName, ClientVersion, *filterCallsign)
 
+	// message number counter
+	// TODO reset this periodically after long periods?
+	n := 1
+
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		for t := range ticker.C {
@@ -129,7 +133,8 @@ func listen() error {
 			if *respond {
 				now := time.Now()
 				txmsg := fmt.Sprintf("rx at %s", now.Format("3:04 PM"))
-				resp := fmt.Sprintf("%s>APRS::%s : %s{1\n", *serverCallsign, f.Source, txmsg)
+				resp := fmt.Sprintf("%s>APRS::%s : %s{%d\n", *serverCallsign, f.Source, txmsg, n)
+				n += 1
 				log.Printf("Sending response: %q\n", strings.TrimSpace(resp))
 				if _, err := conn.Write([]byte(resp)); err != nil {
 					log.Printf("Failed to write packet %v\n", err)
