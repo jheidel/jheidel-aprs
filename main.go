@@ -2,19 +2,55 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/dustin/go-aprs"
 )
 
 const (
-	aprsAddr = "rotate.aprs2.net"
-	aprsPort = 14580
+	ClientName    = "jheidel-aprs"
+	ClientVersion = "1.0"
 )
+
+var (
+	serverCallsign = flag.String("server_callsign", "KI7QIV-10", "Amateur radio callsign for the aprs server")
+
+	filterCallsign = flag.String("filter_callsign", "p/KI7QIV", "APRS-IS filter to apply")
+
+	aprsAddr = flag.String("aprs_addr", "rotate.aprs2.net", "Address of the APRS-IS server to use")
+	aprsPort = flag.Int("aprs_port", 14580, "Port of the provide aprs_addr APRS-IS server")
+
+	// WARNING: responses from this server will be transmitted over ham radio
+	// frequencies. Licensed HAM operators only!
+	respond = flag.Bool("respond", false, "Whether to respond to beacon packets")
+
+	logFile = flag.String("log_file", "log.txt", "File for logging packets")
+)
+
+func logPacket(msg string) error {
+	f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+
+	if _, err := f.Write([]byte(msg + "\n")); err != nil {
+		return err
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func wait() {
 	sigs := make(chan os.Signal, 1)
@@ -25,23 +61,35 @@ func wait() {
 }
 
 func listen() error {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", aprsAddr, aprsPort))
+
+	// TODO: multi-channel for reliability, reconnections & deduping layer.
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", *aprsAddr, *aprsPort))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+	if *respond {
+		fmt.Println("Responses enabled!")
+	}
+
 	fmt.Println("Connection established", conn)
+
+	lastSeen := time.Now()
 
 	reader := bufio.NewReader(conn)
 
-	login := "user KI7QIV-R pass -1 vers jhclient 1.0 filter p/KI7QIV\n"
-	fmt.Fprintf(conn, login)
+	pass := aprs.AddressFromString(*serverCallsign).CallPass()
+	fmt.Printf("Computed password %d\n", pass)
+
+	fmt.Fprintf(conn, "user %s pass %d vers %s %s filter %s\n",
+		*serverCallsign, pass, ClientName, ClientVersion, *filterCallsign)
 
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		for t := range ticker.C {
-			fmt.Fprintf(conn, "# jhclient keepalive %s\n", t)
+			fmt.Fprintf(conn, "# %s keepalive %s\n", ClientName, t)
 		}
 	}()
 
@@ -52,13 +100,41 @@ func listen() error {
 				fmt.Println("Receive error:", err)
 				return
 			}
-			fmt.Println("Message: ", msg)
+			lastSeen = time.Now()
+			msg = strings.TrimSpace(msg)
 
-			if !strings.HasPrefix(msg, "#") {
+			if strings.HasPrefix(msg, "#") {
+				log.Printf("Comment: %v\n", msg)
 				continue
 			}
 
-			// TODO parse packet
+			if err := logPacket(msg); err != nil {
+				log.Printf("Failed to log packet: %v\n", err)
+			}
+
+			f := aprs.ParseFrame(msg)
+			if !f.IsValid() {
+				log.Printf("Invalid packet: %v\n", msg)
+				continue
+			}
+
+			log.Printf("%v\n", f.String())
+			if p, err := f.Body.Position(); err != nil {
+				log.Printf("%v\n", p.String())
+			} else {
+				// TODO, silly library doesn't correctly handle the yaesu packets...
+				log.Printf("Couldn't decode position! %v\n", err)
+			}
+
+			if *respond {
+				now := time.Now()
+				txmsg := fmt.Sprintf("rx at %s", now.Format("3:04 PM"))
+				resp := fmt.Sprintf("%s>APRS::%s : %s{1\n", *serverCallsign, f.Source, txmsg)
+				log.Printf("Sending response: %q\n", strings.TrimSpace(resp))
+				if _, err := conn.Write([]byte(resp)); err != nil {
+					log.Printf("Failed to write packet %v\n", err)
+				}
+			}
 		}
 	}()
 
@@ -67,6 +143,7 @@ func listen() error {
 }
 
 func main() {
+	flag.Parse()
 	fmt.Println("aprs listen server start")
 
 	err := listen()
