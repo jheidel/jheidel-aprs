@@ -41,7 +41,8 @@ func logPacket(msg string) error {
 		return err
 	}
 
-	if _, err := f.Write([]byte(msg + "\n")); err != nil {
+	now := time.Now().Format(time.RFC3339)
+	if _, err := f.Write([]byte(now + ": " + msg + "\n")); err != nil {
 		return err
 	}
 
