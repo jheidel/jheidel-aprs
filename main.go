@@ -123,6 +123,11 @@ func listen() error {
 				continue
 			}
 
+			if strings.HasSuffix(f.Body, fmt.Sprintf("%v:ack%d", *serverCallsign, n-1)) {
+				log.Printf("Previously sent packet acknowledged!\n")
+				continue
+			}
+
 			log.Printf("%v\n", f.String())
 			if p, err := f.Body.Position(); err != nil {
 				log.Printf("%v\n", p.String())
