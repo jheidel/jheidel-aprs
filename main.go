@@ -12,7 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dustin/go-aprs"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/jheidel/go-aprs"
 )
 
 const (
@@ -81,7 +82,11 @@ func listen() error {
 
 	reader := bufio.NewReader(conn)
 
-	pass := aprs.AddressFromString(*serverCallsign).CallPass()
+	call, err := aprs.ParseAddress(*serverCallsign)
+	if err != nil {
+		return err
+	}
+	pass := call.Secret()
 	fmt.Printf("Computed password %d\n", pass)
 
 	fmt.Fprintf(conn, "user %s pass %d vers %s %s filter %s\n",
@@ -117,36 +122,36 @@ func listen() error {
 				log.Printf("Failed to log packet: %v\n", err)
 			}
 
-			f := aprs.ParseFrame(msg)
-			if !f.IsValid() {
-				log.Printf("Invalid packet: %v\n", msg)
+			p, err := aprs.ParsePacket(msg)
+			if err != nil {
+				log.Printf("Invalid packet: %v: %v\n", msg, err)
 				continue
 			}
 
-			log.Printf("%v\n", f.String())
+			log.Printf("NEW PACKET:\n%v\n", spew.Sdump(p))
 
-			message := f.Message()
-			if message.Parsed && message.IsACK() {
-				log.Printf("Previous message acknowledged: %q\n", message.Body)
+			if p.IsAck() {
+				an, err := p.AckNumber()
+				if err != nil {
+					log.Printf("Failed to get ack: %v", err)
+					continue
+				}
+				log.Printf("Previous message #%d acknowledged.", an)
 				continue
 			}
 
-			if p, err := f.Body.Position(); err != nil {
-				log.Printf("%v\n", p.String())
-			} else {
-				// TODO, silly library doesn't correctly handle the yaesu packets...
-				log.Printf("Couldn't decode position! %v\n", err)
-			}
+			log.Printf("POSITION: %v\n", p.Position.String())
 
 			if *respond {
 				now := time.Now()
 				txmsg := fmt.Sprintf("rx at %s", now.Format("3:04 PM"))
-				resp := fmt.Sprintf("%s>APRS,WIDE::%s : %s{%d\n", *serverCallsign, f.Source, txmsg, n)
-				n += 1
-				log.Printf("Sending response: %q\n", strings.TrimSpace(resp))
+				resp := fmt.Sprintf("%s>APRS,WIDE::%s : %s{%d\n", *serverCallsign, p.Src.String(), txmsg, n)
+				log.Printf("Sending response (msg #%d): %q\n", n, strings.TrimSpace(resp))
 				if _, err := conn.Write([]byte(resp)); err != nil {
 					log.Printf("Failed to write packet %v\n", err)
 				}
+
+				n += 1
 			}
 		}
 	}()
