@@ -1,19 +1,18 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"flag"
 	"fmt"
-	"log"
-	"net"
 	"os"
 	"os/signal"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/jheidel/go-aprs"
+	log "github.com/sirupsen/logrus"
+	"jheidel-aprs/client"
 )
 
 const (
@@ -29,11 +28,15 @@ var (
 	aprsAddr = flag.String("aprs_addr", "rotate.aprs2.net", "Address of the APRS-IS server to use")
 	aprsPort = flag.Int("aprs_port", 14580, "Port of the provide aprs_addr APRS-IS server")
 
+	aprsChannels = flag.Int("aprs_channels", 3, "Number of concurrent channels to use for APRS-IS")
+
 	// WARNING: responses from this server will be transmitted over ham radio
 	// frequencies. Licensed HAM operators only!
 	respond = flag.Bool("respond", false, "Whether to respond to beacon packets")
 
 	logFile = flag.String("log_file", "log.txt", "File for logging packets")
+
+	debug = flag.Bool("debug", false, "Log at debug verbosity")
 )
 
 func logPacket(msg string) error {
@@ -54,118 +57,89 @@ func logPacket(msg string) error {
 	return nil
 }
 
-func wait() {
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigs
-	fmt.Println()
-	fmt.Println(sig)
-}
-
-func listen() error {
-
-	// TODO: multi-channel for reliability, reconnections & deduping layer.
-
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", *aprsAddr, *aprsPort))
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	if *respond {
-		fmt.Println("Responses enabled!")
-	}
-
-	fmt.Println("Connection established", conn)
-
-	lastSeen := time.Now()
-
-	reader := bufio.NewReader(conn)
-
-	call, err := aprs.ParseAddress(*serverCallsign)
-	if err != nil {
-		return err
-	}
-	pass := call.Secret()
-	fmt.Printf("Computed password %d\n", pass)
-
-	fmt.Fprintf(conn, "user %s pass %d vers %s %s filter %s\n",
-		*serverCallsign, pass, ClientName, ClientVersion, *filterCallsign)
-
-	// message number counter
-	// TODO reset this periodically after long periods?
-	n := 1
-
+func topLevelContext() context.Context {
+	ctx, cancelf := context.WithCancel(context.Background())
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		for t := range ticker.C {
-			fmt.Fprintf(conn, "# %s keepalive %s\n", ClientName, t)
-		}
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-sigs
+		log.Warnf("Caught signal %q, shutting down.", sig)
+		cancelf()
 	}()
-
-	go func() {
-		for {
-			msg, err := reader.ReadString('\n')
-			if err != nil {
-				fmt.Println("Receive error:", err)
-				return
-			}
-			lastSeen = time.Now()
-			msg = strings.TrimSpace(msg)
-
-			if strings.HasPrefix(msg, "#") {
-				log.Printf("Comment: %v\n", msg)
-				continue
-			}
-
-			if err := logPacket(msg); err != nil {
-				log.Printf("Failed to log packet: %v\n", err)
-			}
-
-			p, err := aprs.ParsePacket(msg)
-			if err != nil {
-				log.Printf("Invalid packet: %v: %v\n", msg, err)
-				continue
-			}
-
-			log.Printf("NEW PACKET:\n%v\n", spew.Sdump(p))
-
-			if p.IsAck() {
-				an, err := p.AckNumber()
-				if err != nil {
-					log.Printf("Failed to get ack: %v", err)
-					continue
-				}
-				log.Printf("Previous message #%d acknowledged.", an)
-				continue
-			}
-
-			log.Printf("POSITION: %v\n", p.Position.String())
-
-			if *respond {
-				now := time.Now()
-				txmsg := fmt.Sprintf("rx at %s", now.Format("3:04 PM"))
-				resp := fmt.Sprintf("%s>APRS,WIDE::%s : %s{%d\n", *serverCallsign, p.Src.String(), txmsg, n)
-				log.Printf("Sending response (msg #%d): %q\n", n, strings.TrimSpace(resp))
-				if _, err := conn.Write([]byte(resp)); err != nil {
-					log.Printf("Failed to write packet %v\n", err)
-				}
-
-				n += 1
-			}
-		}
-	}()
-
-	wait()
-	return nil
+	return ctx
 }
 
 func main() {
 	flag.Parse()
-	fmt.Println("aprs listen server start")
 
-	err := listen()
-	if err != nil {
-		fmt.Println("error; ", err)
+	customFormatter := new(log.TextFormatter)
+	customFormatter.TimestampFormat = "2006-01-02 15:04:05"
+	customFormatter.FullTimestamp = true
+	log.SetFormatter(customFormatter)
+	if *debug {
+		log.SetLevel(log.DebugLevel)
 	}
+
+	log.Infof("jheidel-aprs server starting")
+
+	if *respond {
+		log.Warnf("Responses enabled, will transmit packets!")
+	}
+
+	ctx := topLevelContext()
+	wg := &sync.WaitGroup{}
+
+	outbox := &client.Outbox{}
+	outbox.Run(ctx, wg)
+
+	single := &client.Client{
+		Callsign:      *serverCallsign,
+		Filter:        *filterCallsign,
+		ServerAddress: *aprsAddr,
+		ServerPort:    *aprsPort,
+		Outbox:        outbox,
+	}
+
+	var conn client.ClientInterface
+	multi := &client.MultiClient{}
+	// Connect to multiple servers in parallel for increased reliability.
+	for i := 0; i < *aprsChannels; i++ {
+		next := &client.Client{}
+		*next = *single
+		multi.Clients = append(multi.Clients, next)
+	}
+	conn = multi
+
+	// Initiate async connection to server(s)
+	conn.Run(ctx, wg)
+
+	for ctx.Err() == nil {
+		p := <-conn.Receive()
+		if p == nil {
+			break
+		}
+
+		log.Debugf("Received packet:\n%v", spew.Sdump(p))
+
+		if err := logPacket(p.Raw); err != nil {
+			log.Errorf("Failed to log packet: %v", err)
+		}
+
+		log.Infof("MESSAGE: %v", p.Message)
+		log.Infof("POSITION: %v", p.Position.String())
+
+		if *respond {
+			now := time.Now()
+			text := fmt.Sprintf("RX %s", now.Format("3:04 PM"))
+			log.Infof("REPLY: %v", text)
+			msg := outbox.Send(p.Src, text)
+			go func() {
+				// Wait for acknowledgement or timeout.
+				msg.Wait()
+				log.Infof("Message done %v", spew.Sdump(msg))
+			}()
+		}
+	}
+
+	log.Infof("jheidel-aprs shutdown")
 }
