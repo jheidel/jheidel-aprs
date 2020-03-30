@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	DedupHistory = 60 * time.Minute
+	DedupHistory = 5 * time.Minute
 )
 
 // MultiClient implements a redundant connection to multiple clients.
