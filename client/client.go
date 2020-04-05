@@ -48,7 +48,9 @@ func (c *Client) oneConnection(ctx context.Context) error {
 			StrictErrors: true,
 		},
 	}
-	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:%d", c.ServerAddress, c.ServerPort))
+	addr := fmt.Sprintf("%s:%d", c.ServerAddress, c.ServerPort)
+	log.Infof("Dialing %q", addr)
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}

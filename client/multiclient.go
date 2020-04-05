@@ -54,7 +54,7 @@ func (c *MultiClient) Run(ctx context.Context, wg *sync.WaitGroup) {
 		client.Run(ctx, cwg)
 		// Slightly stagger connection times to avoid addresses all resolving to
 		// the same server
-		sleep(ctx, 250*time.Millisecond)
+		sleep(ctx, time.Second)
 	}
 
 	wg.Add(1)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -28,10 +29,10 @@ var (
 
 	filterCallsign = flag.String("filter_callsign", "p/KI7QIV", "APRS-IS filter to apply")
 
-	aprsAddr = flag.String("aprs_addr", "rotate.aprs2.net", "Address of the APRS-IS server to use")
+	aprsAddr = flag.String("aprs_addr", getEnv("APRS_ADDR", "noam.aprs2.net"), "Address of the APRS-IS server to use")
 	aprsPort = flag.Int("aprs_port", 14580, "Port of the provide aprs_addr APRS-IS server")
 
-	aprsChannels = flag.Int("aprs_channels", 3, "Number of concurrent channels to use for APRS-IS")
+	aprsChannels = flag.Int("aprs_channels", getEnvInt("APRS_CHANNELS", 3), "Number of concurrent channels to use for APRS-IS")
 
 	// WARNING: responses from this server will be transmitted over ham radio
 	// frequencies. Licensed HAM operators only!
@@ -43,6 +44,23 @@ var (
 
 	credentials = flag.String("credentials", "/etc/jheidel-aprs/key.json", "Location of firebase auth key")
 )
+
+func getEnv(key, defaultValue string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if v := os.Getenv(key); v != "" {
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			return i
+		}
+	}
+	return defaultValue
+}
 
 func logPacket(msg string) error {
 	f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
