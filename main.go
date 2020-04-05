@@ -38,8 +38,6 @@ var (
 	// frequencies. Licensed HAM operators only!
 	respond = flag.Bool("respond", false, "Whether to respond to beacon packets")
 
-	logFile = flag.String("log_file", "log.txt", "File for logging packets")
-
 	debug = flag.Bool("debug", false, "Log at debug verbosity")
 
 	credentials = flag.String("credentials", "/etc/jheidel-aprs/key.json", "Location of firebase auth key")
@@ -60,24 +58,6 @@ func getEnvInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
-}
-
-func logPacket(msg string) error {
-	f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now().Format(time.RFC3339)
-	if _, err := f.Write([]byte(now + ": " + msg + "\n")); err != nil {
-		return err
-	}
-
-	if err := f.Close(); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func topLevelContext() context.Context {
@@ -148,11 +128,6 @@ func main() {
 		}
 
 		log.Debugf("Received packet:\n%v", spew.Sdump(p))
-
-		if err := logPacket(p.Raw); err != nil {
-			log.Errorf("Failed to log packet: %v", err)
-		}
-
 		log.Infof("MESSAGE: %v", p.Message)
 		log.Infof("POSITION: %v", p.Position.String())
 

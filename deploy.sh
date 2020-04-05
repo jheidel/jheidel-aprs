@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Pulls the image from docker hub and starts it as a daemon container.
+
 set -x
 
 docker pull jheidel/jheidel-aprs
