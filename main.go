@@ -12,7 +12,10 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/jheidel/go-aprs"
 	"jheidel-aprs/client"
+	"jheidel-aprs/firebase"
 )
 
 const (
@@ -37,6 +40,8 @@ var (
 	logFile = flag.String("log_file", "log.txt", "File for logging packets")
 
 	debug = flag.Bool("debug", false, "Log at debug verbosity")
+
+	credentials = flag.String("credentials", "/etc/jheidel-aprs/key.json", "Location of firebase auth key")
 )
 
 func logPacket(msg string) error {
@@ -89,6 +94,11 @@ func main() {
 	ctx := topLevelContext()
 	wg := &sync.WaitGroup{}
 
+	fb, err := firebase.New(ctx, *credentials)
+	if err != nil {
+		log.Fatalf("Failed to initialize firebase: %v", err)
+	}
+
 	outbox := &client.Outbox{}
 	outbox.Run(ctx, wg)
 
@@ -128,16 +138,30 @@ func main() {
 		log.Infof("MESSAGE: %v", p.Message)
 		log.Infof("POSITION: %v", p.Position.String())
 
+		if err := fb.ReportPacket(ctx, p); err != nil {
+			// This might be an error reporting, but there might also be another
+			// instance that reported first before we could.
+			log.Warnf("Failed to report packet to firebase: %v", err)
+			continue
+		}
+
 		if *respond {
 			now := time.Now()
 			text := fmt.Sprintf("RX %s", now.Format("3:04 PM"))
+
+			// TODO: generate reply message from firebase, maybe using pending
+			// messages?
+
 			log.Infof("REPLY: %v", text)
 			msg := outbox.Send(p.Src, text)
-			go func() {
+			go func(p *aprs.Packet) {
 				// Wait for acknowledgement or timeout.
 				msg.Wait()
 				log.Infof("Message done %v", spew.Sdump(msg))
-			}()
+				if err := fb.Ack(ctx, p, msg); err != nil {
+					log.Errorf("Failed to report message completion to firebase; %v", err)
+				}
+			}(p)
 		}
 	}
 

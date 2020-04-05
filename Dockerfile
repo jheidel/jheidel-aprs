@@ -22,9 +22,12 @@ FROM alpine
 WORKDIR /app
 COPY --from=builder-go /go/src/jheidel-aprs/jheidel-aprs /app
 
+# Create mountpoint for config
+RUN mkdir -p /etc/jheidel-aprs/
+
 # Use local timezone.
 # TODO use system time instead of hardcoded.
 RUN apk add --update tzdata
 ENV TZ=America/Los_Angeles
 
-CMD ["./jheidel-aprs"]
+CMD ["./jheidel-aprs", "--respond"]
