@@ -10,13 +10,27 @@ import (
 	"cloud.google.com/go/firestore"
 	fb "firebase.google.com/go"
 	"github.com/jheidel/go-aprs"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/option"
 
 	"jheidel-aprs/client"
 )
 
+const (
+	ReportHealthInterval = time.Minute
+)
+
+func hostname() string {
+	if h := os.Getenv("DOCKER_HOST"); h != "" {
+		return h
+	}
+	h, _ := os.Hostname()
+	return h
+}
+
 type Firebase struct {
-	client *firestore.Client
+	client  *firestore.Client
+	started time.Time
 }
 
 func New(ctx context.Context, credentials string) (*Firebase, error) {
@@ -29,7 +43,26 @@ func New(ctx context.Context, credentials string) (*Firebase, error) {
 	if err != nil {
 		return nil, fmt.Errorf("firestore client: %v", err)
 	}
-	return &Firebase{client: client}, nil
+	log.Infof("Connected to firestore")
+	f := &Firebase{
+		client:  client,
+		started: time.Now(),
+	}
+	go func() {
+		t := time.Tick(ReportHealthInterval)
+		for ctx.Err() == nil {
+			if err := f.reportHealth(ctx); err != nil {
+				log.Errorf("Failed to report health to firebase: %v", err)
+			}
+			select {
+			case <-t:
+				continue
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return f, nil
 }
 
 type fbAprsPacket struct {
@@ -64,9 +97,8 @@ func (p *fbAprsPacket) ID() string {
 }
 
 func (f *Firebase) ReportPacket(ctx context.Context, p *aprs.Packet) error {
-	hst, _ := os.Hostname()
 	pkt := &fbAprsPacket{
-		Hostname:   hst,
+		Hostname:   hostname(),
 		ReceivedAt: time.Now(),
 
 		Raw:     p.Raw,
@@ -102,5 +134,21 @@ func (f *Firebase) Ack(ctx context.Context, p *aprs.Packet, m *client.Message) e
 		{Path: "reply_id", Value: m.ID},
 		{Path: "reply_attempts", Value: m.Attempts},
 	})
+	return err
+}
+
+type fbAprsGateway struct {
+	Hostname  string    `firestore:"hostname"`
+	StartedAt time.Time `firestore:"started_at"`
+	HealthyAt time.Time `firestore:"healthy_at"`
+}
+
+func (f *Firebase) reportHealth(ctx context.Context) error {
+	h := &fbAprsGateway{
+		Hostname:  hostname(),
+		StartedAt: f.started,
+		HealthyAt: time.Now(),
+	}
+	_, err := f.client.Collection("aprs_gateways").Doc(h.Hostname).Set(ctx, h)
 	return err
 }
