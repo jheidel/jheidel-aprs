@@ -12,6 +12,7 @@ import (
 	"github.com/jheidel/go-aprs"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/option"
+	"google.golang.org/genproto/googleapis/type/latlng"
 
 	"jheidel-aprs/client"
 )
@@ -69,16 +70,15 @@ type fbAprsPacket struct {
 	Hostname   string    `firestore:"hostname"`
 	ReceivedAt time.Time `firestore:"received_at"`
 
-	Raw         string  `firestore:"raw"`
-	Src         string  `firestore:"src"`
-	Dst         string  `firestore:"dst"`
-	Path        string  `firestore:"path"`
-	Comment     string  `firestore:"comment"`
-	Message     string  `firestore:"message"`
-	MessageTo   string  `firestore:"message_to"`
-	HasPosition bool    `firestore:"has_position"`
-	Latitude    float64 `firestore:"latitude"`
-	Longitude   float64 `firestore:"longitude"`
+	Raw         string `firestore:"raw"`
+	Src         string `firestore:"src"`
+	Dst         string `firestore:"dst"`
+	Path        string `firestore:"path"`
+	Comment     string `firestore:"comment"`
+	Message     string `firestore:"message"`
+	MessageTo   string `firestore:"message_to"`
+	HasPosition bool   `firestore:"has_position"`
+	Position    *latlng.LatLng
 
 	ReplyMessage    string    `firestore:"reply_message"`
 	ReplySentAt     time.Time `firestore:"reply_sent_at"`
@@ -113,8 +113,10 @@ func (f *Firebase) ReportPacket(ctx context.Context, p *aprs.Packet) error {
 	}
 	if p.Position != nil {
 		pkt.HasPosition = true
-		pkt.Latitude = p.Position.Latitude
-		pkt.Longitude = p.Position.Longitude
+		pkt.Position = &latlng.LatLng{
+			Latitude:  p.Position.Latitude,
+			Longitude: p.Position.Longitude,
+		}
 	}
 	// https://godoc.org/cloud.google.com/go/firestore
 	_, err := f.client.Collection("aprs_packets").Doc(pkt.ID()).Create(ctx, pkt)
