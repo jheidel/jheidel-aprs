@@ -70,15 +70,15 @@ type fbAprsPacket struct {
 	Hostname   string    `firestore:"hostname"`
 	ReceivedAt time.Time `firestore:"received_at"`
 
-	Raw         string `firestore:"raw"`
-	Src         string `firestore:"src"`
-	Dst         string `firestore:"dst"`
-	Path        string `firestore:"path"`
-	Comment     string `firestore:"comment"`
-	Message     string `firestore:"message"`
-	MessageTo   string `firestore:"message_to"`
-	HasPosition bool   `firestore:"has_position"`
-	Position    *latlng.LatLng
+	Raw         string         `firestore:"raw"`
+	Src         string         `firestore:"src"`
+	Dst         string         `firestore:"dst"`
+	Path        string         `firestore:"path"`
+	Comment     string         `firestore:"comment"`
+	Message     string         `firestore:"message"`
+	MessageTo   string         `firestore:"message_to"`
+	HasPosition bool           `firestore:"has_position"`
+	Position    *latlng.LatLng `firestore:"position"`
 
 	ReplyMessage    string    `firestore:"reply_message"`
 	ReplySentAt     time.Time `firestore:"reply_sent_at"`
