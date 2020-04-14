@@ -2,7 +2,6 @@ package firebase
 
 import (
 	"context"
-	"crypto/sha1"
 	"fmt"
 	"os"
 	"time"
@@ -89,13 +88,6 @@ type fbAprsPacket struct {
 	ReplyAttempts   int       `firestore:"reply_attempts"`
 }
 
-// ID provides a unique identifier for this packet for server-side deduplication.
-func (p *fbAprsPacket) ID() string {
-	h := sha1.New()
-	h.Write([]byte(p.Raw))
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
 func (f *Firebase) ReportPacket(ctx context.Context, p *aprs.Packet) error {
 	pkt := &fbAprsPacket{
 		Hostname:   hostname(),
@@ -119,15 +111,12 @@ func (f *Firebase) ReportPacket(ctx context.Context, p *aprs.Packet) error {
 		}
 	}
 	// https://godoc.org/cloud.google.com/go/firestore
-	_, err := f.client.Collection("aprs_packets").Doc(pkt.ID()).Create(ctx, pkt)
+	_, err := f.client.Collection("aprs_packets").Doc(p.Hash()).Create(ctx, pkt)
 	return err
 }
 
 func (f *Firebase) Ack(ctx context.Context, p *aprs.Packet, m *client.Message) error {
-	pkt := &fbAprsPacket{
-		Raw: p.Raw,
-	}
-	_, err := f.client.Collection("aprs_packets").Doc(pkt.ID()).Update(ctx, []firestore.Update{
+	_, err := f.client.Collection("aprs_packets").Doc(p.Hash()).Update(ctx, []firestore.Update{
 		{Path: "reply_message", Value: m.Message},
 		{Path: "reply_sent_at", Value: m.SentAt},
 		{Path: "reply_last_sent_at", Value: m.LastSentAt},

@@ -121,7 +121,7 @@ func (c *Client) oneConnection(ctx context.Context) error {
 				continue
 			}
 
-			clog.Debugf("RECEIVE: %v", p.Raw)
+			clog.Debugf("RECEIVE: %v (hash %s)", p.Raw, p.Hash())
 
 			if p.Src.String() == c.Callsign {
 				// We may pick up our own packets due to multiple APRS-IS connections.

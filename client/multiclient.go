@@ -39,8 +39,9 @@ func (c *MultiClient) isDuplicate(p *aprs.Packet) bool {
 	}
 
 	// Check history and track.
-	_, ok := c.history[p.Raw]
-	c.history[p.Raw] = time.Now()
+	key := p.Hash()
+	_, ok := c.history[key]
+	c.history[key] = time.Now()
 	return ok
 }
 
