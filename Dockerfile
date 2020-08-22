@@ -12,7 +12,7 @@ COPY . .
 
 # Build the standalone executable.
 RUN go get ./...
-RUN go build
+RUN go build --ldflags "-X main.buildLabel=`git rev-parse --short HEAD`"
 
 ####
 # Compose everything into a final minimal image.

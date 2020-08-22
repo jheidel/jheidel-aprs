@@ -41,6 +41,8 @@ var (
 	debug = flag.Bool("debug", false, "Log at debug verbosity")
 
 	credentials = flag.String("credentials", "/etc/jheidel-aprs/key.json", "Location of firebase auth key")
+
+	buildLabel string
 )
 
 func getEnv(key, defaultValue string) string {
@@ -83,7 +85,7 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	log.Infof("jheidel-aprs server starting")
+	log.Infof("jheidel-aprs server starting (version %s)", buildLabel)
 
 	if *respond {
 		log.Warnf("Responses enabled, will transmit packets!")
@@ -96,6 +98,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize firebase: %v", err)
 	}
+	fb.BuildLabel = buildLabel
 
 	outbox := &client.Outbox{}
 	outbox.Run(ctx, wg)
