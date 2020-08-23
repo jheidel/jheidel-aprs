@@ -10,4 +10,5 @@ import (
 type ClientInterface interface {
 	Run(ctx context.Context, wg *sync.WaitGroup)
 	Receive() <-chan *aprs.Packet
+	Status() error
 }

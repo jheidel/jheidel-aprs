@@ -62,4 +62,17 @@ func (h *AprsHandler) Run(ctx context.Context, wg *sync.WaitGroup) {
 			}
 		}
 	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(15 * time.Second)
+		for ctx.Err() == nil {
+			select {
+			case <-t.C:
+				h.Firebase.SetHealth("aprs", h.Client.Status())
+			case <-ctx.Done():
+			}
+		}
+	}()
 }

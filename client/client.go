@@ -37,6 +37,15 @@ type Client struct {
 	inbound        chan *aprs.Packet
 
 	packetIndex int
+
+	mu        sync.Mutex
+	lastError error
+}
+
+func (c *Client) Status() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastError
 }
 
 func (c *Client) oneConnection(ctx context.Context) error {
@@ -104,6 +113,9 @@ func (c *Client) oneConnection(ctx context.Context) error {
 		case err := <-errc:
 			return fmt.Errorf("receive error: %v", err)
 		case line := <-readc:
+			c.mu.Lock()
+			c.lastError = nil
+			c.mu.Unlock()
 			// New line received from server.
 			keepAliveRx.Reset(ConnectionTimeout)
 			// Reset exponential backoff delay.
@@ -166,6 +178,9 @@ func (c *Client) loop(ctx context.Context) {
 		log.Infof("Disconnected from server")
 		return
 	}
+	c.mu.Lock()
+	c.lastError = err
+	c.mu.Unlock()
 	log.Errorf("Disconnected from server: %v", err)
 
 	log.Infof("Reconnecting after delay of %v...", c.reconnectDelay)

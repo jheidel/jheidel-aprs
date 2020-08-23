@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -90,4 +91,15 @@ func (c *MultiClient) Run(ctx context.Context, wg *sync.WaitGroup) {
 
 func (c *MultiClient) Receive() <-chan *aprs.Packet {
 	return c.inbound
+}
+
+func (c *MultiClient) Status() error {
+	var err error
+	for _, sc := range c.Clients {
+		err = sc.Status()
+		if err == nil {
+			return nil // one client healthy means we're healthy
+		}
+	}
+	return fmt.Errorf("no clients healthy: %v", err)
 }
