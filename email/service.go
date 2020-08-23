@@ -114,7 +114,9 @@ func (s *Service) Run(ctx context.Context, wg *sync.WaitGroup) {
 	go func() {
 		defer wg.Done()
 		f := func() {
-			if err := s.runOnce(ctx); err != nil {
+			err := s.runOnce(ctx)
+			s.Firebase.SetHealth("email", err)
+			if err != nil {
 				log.Errorf("Failed email poll: %v", err)
 
 				// Force reconnect next time around

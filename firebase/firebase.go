@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -34,6 +35,7 @@ type Firebase struct {
 
 	client  *firestore.Client
 	started time.Time
+	health  sync.Map
 }
 
 func New(ctx context.Context, credentials string) (*Firebase, error) {
@@ -52,13 +54,17 @@ func New(ctx context.Context, credentials string) (*Firebase, error) {
 		started: time.Now(),
 	}
 	go func() {
-		t := time.Tick(ReportHealthInterval)
-		for ctx.Err() == nil {
+		f := func() {
 			if err := f.reportHealth(ctx); err != nil {
 				log.Errorf("Failed to report health to firebase: %v", err)
 			}
+		}
+		f()
+		t := time.Tick(ReportHealthInterval)
+		for ctx.Err() == nil {
 			select {
 			case <-t:
+				f()
 				continue
 			case <-ctx.Done():
 				return
@@ -163,20 +169,43 @@ func (f *Firebase) ReportAprsAck(ctx context.Context, p *aprs.Packet, m *client.
 	return err
 }
 
-type fbAprsGateway struct {
-	Hostname   string    `firestore:"hostname"`
-	StartedAt  time.Time `firestore:"started_at"`
-	HealthyAt  time.Time `firestore:"healthy_at"`
-	BuildLabel string    `firestore:"build_label"`
+type healthModule struct {
+	Name    string `firestore:"name"`
+	OK      bool   `firestore:"ok"`
+	Message string `firestore:"message"`
+}
+
+type health struct {
+	Hostname   string          `firestore:"hostname"`
+	StartedAt  time.Time       `firestore:"started_at"`
+	HealthyAt  time.Time       `firestore:"healthy_at"`
+	BuildLabel string          `firestore:"build_label"`
+	Modules    []*healthModule `firestore:"modules"`
+}
+
+func (f *Firebase) SetHealth(module string, err error) {
+	h := &healthModule{
+		Name: module,
+		OK:   err == nil,
+	}
+	if err != nil {
+		h.Message = err.Error()
+	}
+	log.Debugf("Module %q health %v", h.Name, h.OK)
+	f.health.Store(module, h)
 }
 
 func (f *Firebase) reportHealth(ctx context.Context) error {
-	h := &fbAprsGateway{
+	h := &health{
 		Hostname:   hostname(),
 		StartedAt:  f.started,
 		HealthyAt:  time.Now(),
 		BuildLabel: f.BuildLabel,
 	}
+	f.health.Range(func(k, v interface{}) bool {
+		h.Modules = append(h.Modules, v.(*healthModule))
+		return true
+	})
 	_, err := f.client.Collection("gateways").Doc(h.Hostname).Set(ctx, h)
 	return err
 }
