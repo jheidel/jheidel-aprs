@@ -14,6 +14,7 @@ import (
 	"google.golang.org/genproto/googleapis/type/latlng"
 
 	"jheidel-aprs/client"
+	email "jheidel-aprs/email/types"
 )
 
 const (
@@ -84,6 +85,10 @@ type AprsPacket struct {
 	ReplyAttempts   int       `firestore:"reply_attempts"`
 }
 
+type EmailPacket struct {
+	Raw string `firestore:"raw"`
+}
+
 type Packet struct {
 	Hostname   string    `firestore:"hostname"`
 	ReceivedAt time.Time `firestore:"received_at"`
@@ -92,10 +97,11 @@ type Packet struct {
 	HasPosition bool           `firestore:"has_position"`
 	Position    *latlng.LatLng `firestore:"position"`
 
-	Aprs *AprsPacket `firestore:"aprs"`
+	Aprs  *AprsPacket  `firestore:"aprs"`
+	Email *EmailPacket `firestore:"email"`
 }
 
-func (f *Firebase) ReportPacket(ctx context.Context, p *aprs.Packet) error {
+func (f *Firebase) ReportAprsPacket(ctx context.Context, p *aprs.Packet) error {
 	pkt := &Packet{
 		Hostname:   hostname(),
 		ReceivedAt: time.Now(),
@@ -121,12 +127,31 @@ func (f *Firebase) ReportPacket(ctx context.Context, p *aprs.Packet) error {
 	}
 	id := fmt.Sprintf("aprs:%s", p.Hash())
 	// https://godoc.org/cloud.google.com/go/firestore
-	_, err := f.client.Collection("aprs_packets").Doc(id).Create(ctx, pkt)
+	_, err := f.client.Collection("packets").Doc(id).Create(ctx, pkt)
 	return err
 }
 
-func (f *Firebase) Ack(ctx context.Context, p *aprs.Packet, m *client.Message) error {
-	_, err := f.client.Collection("aprs_packets").Doc(p.Hash()).Update(ctx, []firestore.Update{
+func (f *Firebase) ReportEmail(ctx context.Context, e *email.Email) error {
+	pkt := &Packet{
+		Hostname:   hostname(),
+		ReceivedAt: e.Time,
+		Message:    e.Message,
+
+		Email: &EmailPacket{
+			Raw: e.FullMessage,
+		},
+	}
+	if e.Position != nil {
+		pkt.HasPosition = true
+		pkt.Position = e.Position
+	}
+	id := fmt.Sprintf("email:%s", e.ID)
+	_, err := f.client.Collection("packets").Doc(id).Create(ctx, pkt)
+	return err
+}
+
+func (f *Firebase) ReportAprsAck(ctx context.Context, p *aprs.Packet, m *client.Message) error {
+	_, err := f.client.Collection("packets").Doc(p.Hash()).Update(ctx, []firestore.Update{
 		{Path: "aprs.reply_message", Value: m.Message},
 		{Path: "aprs.reply_sent_at", Value: m.SentAt},
 		{Path: "aprs.reply_last_sent_at", Value: m.LastSentAt},
@@ -152,6 +177,21 @@ func (f *Firebase) reportHealth(ctx context.Context) error {
 		HealthyAt:  time.Now(),
 		BuildLabel: f.BuildLabel,
 	}
-	_, err := f.client.Collection("aprs_gateways").Doc(h.Hostname).Set(ctx, h)
+	_, err := f.client.Collection("gateways").Doc(h.Hostname).Set(ctx, h)
 	return err
+}
+
+func (f *Firebase) StoreCredentials(ctx context.Context, creds *email.Credentials) error {
+	_, err := f.client.Collection("environment").Doc("email_creds").Set(ctx, creds)
+	return err
+}
+
+func (f *Firebase) LoadCredentials(ctx context.Context) (*email.Credentials, error) {
+	var creds email.Credentials
+	doc, err := f.client.Collection("environment").Doc("email_creds").Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	doc.DataTo(&creds)
+	return &creds, nil
 }

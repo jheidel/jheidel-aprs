@@ -3,25 +3,17 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
 	"sync"
 	"syscall"
-	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/jheidel/go-aprs"
 	"jheidel-aprs/client"
+	"jheidel-aprs/email"
 	"jheidel-aprs/firebase"
-)
-
-const (
-	ClientName    = "jheidel-aprs"
-	ClientVersion = "1.0"
 )
 
 var (
@@ -41,6 +33,8 @@ var (
 	debug = flag.Bool("debug", false, "Log at debug verbosity")
 
 	credentials = flag.String("credentials", "/etc/jheidel-aprs/key.json", "Location of firebase auth key")
+
+	emailAuth = flag.Bool("email_auth", false, "Run email authorization")
 
 	buildLabel string
 )
@@ -100,6 +94,23 @@ func main() {
 	}
 	fb.BuildLabel = buildLabel
 
+	eauth := &email.Auth{
+		Firebase: fb,
+	}
+
+	if *emailAuth {
+		if err := eauth.Generate(ctx); err != nil {
+			log.Fatalf("Failed to generate email creds: %v", err)
+		}
+		log.Exit(0)
+	}
+
+	email := &email.Service{
+		Auth:     eauth,
+		Firebase: fb,
+	}
+	email.Run(ctx, wg)
+
 	outbox := &client.Outbox{}
 	outbox.Run(ctx, wg)
 
@@ -109,6 +120,7 @@ func main() {
 		ServerAddress: *aprsAddr,
 		ServerPort:    *aprsPort,
 		Outbox:        outbox,
+		BuildLabel:    buildLabel,
 	}
 
 	var conn client.ClientInterface
@@ -124,42 +136,15 @@ func main() {
 	// Initiate async connection to server(s)
 	conn.Run(ctx, wg)
 
-	for ctx.Err() == nil {
-		p := <-conn.Receive()
-		if p == nil {
-			break
-		}
-
-		log.Debugf("Received packet:\n%v", spew.Sdump(p))
-		log.Infof("MESSAGE: %v", p.Message)
-		log.Infof("POSITION: %v", p.Position.String())
-
-		if err := fb.ReportPacket(ctx, p); err != nil {
-			// This might be an error reporting, but there might also be another
-			// instance that reported first before we could.
-			log.Warnf("Failed to report packet to firebase: %v", err)
-			continue
-		}
-
-		if *respond {
-			now := time.Now()
-			text := fmt.Sprintf("RX %s", now.Format("3:04 PM"))
-
-			// TODO: generate reply message from firebase, maybe using pending
-			// messages?
-
-			log.Infof("REPLY: %v", text)
-			msg := outbox.Send(p.Src, text)
-			go func(p *aprs.Packet) {
-				// Wait for acknowledgement or timeout.
-				msg.Wait()
-				log.Infof("Message done %v", spew.Sdump(msg))
-				if err := fb.Ack(ctx, p, msg); err != nil {
-					log.Errorf("Failed to report message completion to firebase; %v", err)
-				}
-			}(p)
-		}
+	ah := &AprsHandler{
+		Client:   conn,
+		Outbox:   outbox,
+		Firebase: fb,
 	}
+	ah.Run(ctx, wg)
 
+	// TODO implement email handler
+
+	wg.Wait()
 	log.Infof("jheidel-aprs shutdown")
 }

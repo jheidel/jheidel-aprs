@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	ClientName    = "jheidel-aprs"
-	ClientVersion = "1.1"
+	ClientName = "jheidel-aprs"
 
 	ReconnectDelayMin = 500 * time.Millisecond
 	ReconnectDelayMax = 30 * time.Second
@@ -32,6 +31,7 @@ type Client struct {
 	ServerAddress string
 	ServerPort    int
 	Outbox        *Outbox
+	BuildLabel    string
 
 	reconnectDelay time.Duration
 	inbound        chan *aprs.Packet
@@ -67,7 +67,7 @@ func (c *Client) oneConnection(ctx context.Context) error {
 		return err
 	}
 	_, err = fmt.Fprintf(conn, "user %s pass %d vers %s %s filter %s\n",
-		c.Callsign, call.Secret(), ClientName, ClientVersion, c.Filter)
+		c.Callsign, call.Secret(), ClientName, c.BuildLabel, c.Filter)
 	if err != nil {
 		return err
 	}
