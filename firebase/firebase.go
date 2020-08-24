@@ -157,7 +157,8 @@ func (f *Firebase) ReportEmail(ctx context.Context, e *email.Email) error {
 }
 
 func (f *Firebase) ReportAprsAck(ctx context.Context, p *aprs.Packet, m *client.Message) error {
-	_, err := f.client.Collection("packets").Doc(p.Hash()).Update(ctx, []firestore.Update{
+	id := fmt.Sprintf("aprs:%s", p.Hash())
+	_, err := f.client.Collection("packets").Doc(id).Update(ctx, []firestore.Update{
 		{Path: "aprs.reply_message", Value: m.Message},
 		{Path: "aprs.reply_sent_at", Value: m.SentAt},
 		{Path: "aprs.reply_last_sent_at", Value: m.LastSentAt},
